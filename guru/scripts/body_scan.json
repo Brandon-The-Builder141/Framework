@@ -1,0 +1,22 @@
+{
+  "name": "body_scan",
+  "title": "Body Scan",
+  "duration_minutes": 10,
+  "segments": [
+    {"type": "speech", "text": "Lie down or sit with support. Close your eyes if that feels safe."},
+    {"type": "pause", "seconds": 10},
+    {"type": "speech", "text": "Notice your feet. Toes, arches, heels. No need to change anything."},
+    {"type": "pause", "seconds": 25},
+    {"type": "speech", "text": "Move attention up the legs. Calves, knees, thighs."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Belly and chest. Feel breath move without forcing it."},
+    {"type": "pause", "seconds": 35},
+    {"type": "speech", "text": "Hands, arms, shoulders. Let them be heavy."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Jaw, eyes, forehead. Soften the whole head."},
+    {"type": "pause", "seconds": 40},
+    {"type": "speech", "text": "Feel the body as one field of sensation. Rest here."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Slowly wiggle fingers and toes. Open your eyes when ready."}
+  ]
+}

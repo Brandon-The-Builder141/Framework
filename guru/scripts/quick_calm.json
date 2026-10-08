@@ -1,0 +1,15 @@
+{
+  "name": "quick_calm",
+  "title": "Quick Calm (demo)",
+  "duration_minutes": 1,
+  "segments": [
+    {"type": "speech", "text": "Quick calm session. Three breaths with me."},
+    {"type": "pause", "seconds": 3},
+    {"type": "speech", "text": "Inhale slowly."},
+    {"type": "pause", "seconds": 4},
+    {"type": "speech", "text": "Exhale. Release your shoulders."},
+    {"type": "pause", "seconds": 4},
+    {"type": "speech", "text": "One more breath. You're good."},
+    {"type": "pause", "seconds": 3}
+  ]
+}

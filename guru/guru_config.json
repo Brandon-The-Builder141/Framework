@@ -1,0 +1,51 @@
+{
+  "guild_id": "1520464796263383222",
+  "category_name": "Relaxing Spot",
+  "voice_channel_name": "Meditation Vibes",
+  "text_channel_name": "Inspirational Vibes",
+  "voice_channel_id": "1521560667105267824",
+  "text_channel_id": "1520592106127622318",
+  "owner_discord_id": "531896743063846943",
+  "trusted_user_ids": [
+    "531896743063846943",
+    "550782786013757442"
+  ],
+  "youtube_urls": [
+    "https://www.youtube.com/watch?v=inpok4MKVLM",
+    "https://www.youtube.com/watch?v=WPni755-Krg",
+    "https://www.youtube.com/watch?v=n61ULEU7CO0",
+    "https://www.youtube.com/watch?v=1ZYbU82GVz4"
+  ],
+  "youtube_playlist_id": "PLUk6kiS8mQYxhW0hh-zL90PUKs5G8fc2T",
+  "fallback_audio_dir": "audio",
+  "local_music_files": [
+    "relaxation-sleep-jean-angius.mp3",
+    "meditation-leberch.mp3",
+    "spiritual-meditation-mountain.mp3",
+    "relaxing-piano-clavier.mp3",
+    "calm-my-mind.mp3",
+    "mushroom-temple-drift.mp3",
+    "violet-orbit.mp3",
+    "zen-instrumental-ambient.mp3",
+    "dreamcatcher-calm-ambient.mp3",
+    "lost-ambient-pads.mp3",
+    "fragments-aerhead-ambient.mp3",
+    "positive-mood-ambient.mp3",
+    "five-minute-relaxing-calm.mp3",
+    "relax-five-minute-calm.mp3",
+    "five-minute-royalty-calm.mp3",
+    "peaceful-background-calm.mp3",
+    "free-ambient-meditation.mp3"
+  ],
+  "background_volume": 0.22,
+  "ambient_local_only": true,
+  "ambient_gap_seconds": 4,
+  "skip_cooldown_seconds": 5,
+  "quote_interval_hours": 4,
+  "quote_startup_delay_minutes": 3,
+  "default_mood": "calm",
+  "tts_voice": "en-US-AriaNeural",
+  "demo_mode": false,
+  "quotes_enabled": false,
+  "category_id": ""
+}

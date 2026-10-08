@@ -1,0 +1,29 @@
+{
+  "name": "bedtime_winddown",
+  "title": "Bedtime Wind-Down",
+  "duration_minutes": 5,
+  "explicit_only": true,
+  "segments": [
+    {"type": "speech", "text": "Welcome. It's time to let the day go. Lie back, and let yourself be held by the bed beneath you."},
+    {"type": "pause", "seconds": 8},
+    {"type": "speech", "text": "There's nothing left to do now. Nowhere to be. Just here, just resting."},
+    {"type": "pause", "seconds": 10},
+    {"type": "speech", "text": "Take a slow breath in through your nose. And a long, soft breath out."},
+    {"type": "pause", "seconds": 12},
+    {"type": "speech", "text": "Again. Breathing in calm. And breathing out the weight of the day."},
+    {"type": "pause", "seconds": 15},
+    {"type": "speech", "text": "Let your jaw soften. Let your shoulders sink down, away from your ears."},
+    {"type": "pause", "seconds": 18},
+    {"type": "speech", "text": "Feel your arms growing heavy. Your hands, still and warm."},
+    {"type": "pause", "seconds": 20},
+    {"type": "speech", "text": "With every breath out, you sink a little deeper into rest."},
+    {"type": "pause", "seconds": 25},
+    {"type": "speech", "text": "There is nothing to hold onto. Let your thoughts drift by like clouds."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Your body is heavy now. Calm. Safe."},
+    {"type": "pause", "seconds": 35},
+    {"type": "speech", "text": "Let the quiet carry you. Drift, gently, toward sleep."},
+    {"type": "pause", "seconds": 45},
+    {"type": "speech", "text": "Rest now. I'll let you go. Sleep well."}
+  ]
+}

@@ -1,0 +1,487 @@
+"""System access tools: files, processes, clipboard, system info."""
+import asyncio
+import os
+import platform
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from src.tools.training_env import env_for_child
+
+
+def _resolve(path: str) -> Path:
+    """Expand ``~`` and resolve to an absolute path.
+
+    Resolution is done with ``strict=False`` so non-existent parents are
+    still normalized (important for write_file on a brand-new path).
+    Returns the absolute Path; the caller decides what to do with it.
+    """
+    return Path(path).expanduser().resolve(strict=False)
+
+
+def _safe_cwd(cwd: str | None) -> str:
+    """Pick a sane working directory for a child process.
+
+    A caller-supplied directory wins *if it actually exists*. Otherwise we
+    fall back to the project root (never ``os.getcwd()`` — when the app is
+    started by double-click on Windows that is ``C:\\Windows\\System32``,
+    which is unwritable and makes every ``mkdir``/relative write fail with
+    "Access is denied").
+    """
+    if cwd:
+        p = Path(cwd).expanduser()
+        if p.is_dir():
+            return str(p)
+    try:
+        from config.settings import PROJECT_ROOT
+
+        return str(PROJECT_ROOT)
+    except Exception:
+        return str(Path.home())
+
+
+async def make_directory(path: str) -> str:
+    """Create a directory (and any missing parents). Idempotent.
+
+    Use this instead of ``run_command('mkdir ...')`` — it resolves ``~`` and
+    relative paths against a real base, reports the absolute path, and gives
+    an actionable message when the OS refuses.
+    """
+    abs_p = _resolve(path)
+    if abs_p.exists():
+        if abs_p.is_dir():
+            return f"OK: directory already exists: {abs_p}"
+        return f"Error: a file (not a directory) already exists at {abs_p}"
+    try:
+        abs_p.mkdir(parents=True, exist_ok=True)
+    except PermissionError as e:
+        return (
+            f"Error: permission denied creating {abs_p}: {e}. "
+            "If this is under Desktop/Documents, check Windows Security > "
+            "Ransomware protection > Controlled folder access."
+        )
+    except OSError as e:
+        return f"Error: could not create {abs_p}: {e}"
+    return f"Created directory: {abs_p}" if abs_p.is_dir() else f"Error: mkdir reported success but {abs_p} is missing"
+
+
+def _log_write(abs_path: Path, ok: bool, detail: str) -> None:
+    """Best-effort write-to-agent-log. Never raises."""
+    try:
+        from src.logging_config import log_tool_result
+        log_tool_result(
+            "write_file",
+            f"{'OK' if ok else 'FAIL'} {abs_path} :: {detail}",
+            is_error=not ok,
+        )
+    except Exception:
+        pass
+
+
+async def read_file(path: str) -> str:
+    """Read file contents.
+
+    Always echoes the resolved absolute path in error messages so the caller
+    can see exactly where we looked — fixes the "I said it's there but you
+    can't find it" confusion.
+    """
+    abs_p = _resolve(path)
+    if not abs_p.exists():
+        return f"Error: File not found at {abs_p} (you passed: {path!r})"
+    if not abs_p.is_file():
+        return f"Error: Not a file: {abs_p}"
+    try:
+        return abs_p.read_text(encoding="utf-8", errors="replace")
+    except PermissionError as e:
+        return f"Error: Permission denied reading {abs_p}: {e}"
+    except OSError as e:
+        return f"Error reading {abs_p}: {e}"
+
+
+async def write_file(path: str, content: str) -> str:
+    """Write content atomically and verify the result.
+
+    Behavior:
+    - Resolves ``path`` to an absolute path before doing anything.
+    - Creates parent directories as needed.
+    - Writes to a sibling temp file in the same directory, fsyncs, then
+      atomically replaces the destination. A crash mid-write leaves the
+      destination either fully old or fully new — never partial.
+    - After the replace, re-stats the destination to confirm both that the
+      file exists AND that its byte count matches what we wrote.
+    - The success message includes the absolute path AND the byte count, so
+      callers always have unambiguous information to report back.
+    - Specific exception handling: PermissionError, IsADirectoryError,
+      OSError with errno, etc. each return distinct, actionable messages.
+    """
+    if content is None:
+        # Don't pretend we wrote something. Empty string is a valid empty
+        # file — None is a programming error worth surfacing.
+        return "Error: write_file called with content=None (use empty string for an empty file)"
+    if not isinstance(content, str):
+        return f"Error: write_file content must be str, got {type(content).__name__}"
+
+    abs_p = _resolve(path)
+    expected_bytes = len(content.encode("utf-8"))
+
+    # Refuse to overwrite a directory with a file — Path.write_text would
+    # raise IsADirectoryError but the message would be opaque.
+    if abs_p.exists() and abs_p.is_dir():
+        msg = f"Error: refusing to overwrite directory at {abs_p}"
+        _log_write(abs_p, False, msg)
+        return msg
+
+    try:
+        abs_p.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError as e:
+        msg = f"Error: permission denied creating parent of {abs_p}: {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+    except OSError as e:
+        msg = f"Error: could not create parent of {abs_p}: {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+
+    # Atomic write: temp in the same dir (so os.replace is a true rename
+    # within the same filesystem), fsync, then replace.
+    tmp_path: Path | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{abs_p.name}.", suffix=".tmp", dir=str(abs_p.parent)
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                f.write(content)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    # Some filesystems (network, virtual) don't support fsync.
+                    # Not fatal — atomic replace still gives us all-or-nothing.
+                    pass
+        except Exception:
+            # Make sure the temp file doesn't linger on a write failure.
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+        os.replace(tmp_path, abs_p)
+        tmp_path = None  # ownership transferred
+    except PermissionError as e:
+        msg = f"Error: permission denied writing {abs_p}: {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+    except IsADirectoryError as e:
+        msg = f"Error: target is a directory at {abs_p}: {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+    except FileNotFoundError as e:
+        msg = f"Error: parent directory missing for {abs_p}: {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+    except OSError as e:
+        # Catches No space left on device, Read-only filesystem, etc.
+        errno_label = f"errno={e.errno}" if e.errno is not None else "no errno"
+        msg = f"Error: OS error writing {abs_p} ({errno_label}): {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+    finally:
+        # Belt-and-suspenders cleanup if the temp leaked.
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+    # Verify: the file we just wrote must exist with the byte count we expect.
+    # If either fails, something pathological happened (AV quarantine, etc.)
+    # and we MUST tell the truth instead of returning a misleading success.
+    try:
+        actual_bytes = abs_p.stat().st_size
+    except OSError as e:
+        msg = f"Error: write to {abs_p} reported success but stat failed: {e}"
+        _log_write(abs_p, False, msg)
+        return msg
+
+    if actual_bytes != expected_bytes:
+        msg = (
+            f"Error: write to {abs_p} did not verify: expected "
+            f"{expected_bytes} bytes, found {actual_bytes}"
+        )
+        _log_write(abs_p, False, msg)
+        return msg
+
+    # Success — report the absolute path AND the byte count so the caller
+    # has unambiguous information to relay to the user.
+    success = f"Written and verified: {abs_p} ({actual_bytes} bytes)"
+    _log_write(abs_p, True, f"{actual_bytes} bytes")
+    
+    # Automatically register in centralized artifact registry
+    try:
+        from src.artifact_memory import record_artifact
+        record_artifact(
+            str(abs_p),
+            title=abs_p.name,
+            summary="Automatically recorded upon write_file tool invocation.",
+            source="write_file_tool"
+        )
+    except Exception:
+        pass
+        
+    return success
+
+
+async def smart_write_file(path: str, content: str, force_overwrite: bool = False) -> str:
+    """Write a file with an overwrite guard for existing artifacts.
+
+    - New file (or force_overwrite=True): delegates directly to write_file.
+    - Existing file: returns a [no_overwrite guard] message listing the artifact
+      ID and available sections so the caller can use edit_artifact_section for
+      fine-grained edits instead of replacing the whole file.
+    """
+    abs_p = _resolve(path)
+
+    if not abs_p.exists() or force_overwrite:
+        return await write_file(path, content)
+
+    # File exists — gather artifact context
+    artifact_id: str | None = None
+    sections: list = []
+    try:
+        from src.artifact_memory import get_artifact as _get_artifact
+        artifact = _get_artifact(str(abs_p))
+        if artifact:
+            artifact_id = artifact.id
+            sections = artifact.sections or []
+    except Exception:
+        pass
+
+    lines = [f"[no_overwrite guard] File already exists: {abs_p}"]
+    if artifact_id:
+        lines.append(f"Artifact ID: {artifact_id}")
+    if sections:
+        sec_ids = ", ".join(f"'{s['id']}'" for s in sections[:12])
+        lines.append(f"Sections: {sec_ids}")
+        lines.append(
+            f"Use edit_artifact_section(identifier='{artifact_id}', "
+            f"section_id='<id>', content='...') to update one section without "
+            f"overwriting the whole file."
+        )
+    lines.append(
+        "To replace the entire file call smart_write_file with force_overwrite=true."
+    )
+    return "\n".join(lines)
+
+
+async def list_dir(path: str) -> str:
+    """List directory contents. Always echoes the resolved absolute path."""
+    abs_p = _resolve(path) if path else Path.cwd().resolve()
+    if not abs_p.exists():
+        return f"Error: Path not found at {abs_p} (you passed: {path!r})"
+    if not abs_p.is_dir():
+        return f"Error: Not a directory: {abs_p}"
+    try:
+        items = list(abs_p.iterdir())
+        lines = [
+            f"  {x.name}{'/' if x.is_dir() else ''}"
+            for x in sorted(items, key=lambda x: (not x.is_dir(), x.name))
+        ]
+        body = "\n".join(lines) if lines else "(empty)"
+        return f"# {abs_p}\n{body}"
+    except PermissionError as e:
+        return f"Error: permission denied listing {abs_p}: {e}"
+    except OSError as e:
+        return f"Error listing {abs_p}: {e}"
+
+
+async def verify_file_exists(path: str) -> str:
+    """Confirm a file exists at ``path`` and report its size.
+
+    Use this whenever you've just written a file and want to be sure before
+    telling the user it's there. Cheap to call.
+    """
+    abs_p = _resolve(path)
+    if not abs_p.exists():
+        return f"NOT FOUND: {abs_p} (you passed: {path!r})"
+    if abs_p.is_dir():
+        try:
+            n = sum(1 for _ in abs_p.iterdir())
+        except OSError:
+            n = -1
+        return f"DIRECTORY: {abs_p} ({n} entries)" if n >= 0 else f"DIRECTORY: {abs_p}"
+    try:
+        size = abs_p.stat().st_size
+    except OSError as e:
+        return f"EXISTS but stat failed for {abs_p}: {e}"
+    return f"EXISTS: {abs_p} ({size} bytes)"
+
+
+_DEV_SERVER_CMD = re.compile(
+    r"\b(npm\s+run\s+dev|npm\s+start|yarn\s+dev|pnpm\s+dev|vite(\s|$)|flask\s+run|uvicorn\b)",
+    re.IGNORECASE,
+)
+_DEV_SERVER_READY = re.compile(
+    r"(localhost:\d+|Local:\s*https?://|ready in \d+|VITE v\d)",
+    re.IGNORECASE,
+)
+
+
+async def run_command(cmd: str, cwd: str | None = None, timeout: int = 60) -> str:
+    """Run shell command. Use carefully."""
+    import time
+    start_time = time.time()
+    proc = None
+    run_cwd = _safe_cwd(cwd)
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            cwd=run_cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env_for_child(cmd),
+        )
+        out_bytes, err_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        out = (out_bytes or b"").decode("utf-8", errors="replace").strip()
+        err = (err_bytes or b"").decode("utf-8", errors="replace").strip()
+
+        # Scan for generated/modified files
+        _scan_and_record_recent_files(start_time, run_cwd)
+
+        if err:
+            return f"stdout:\n{out}\n\nstderr:\n{err}\n\nexit: {proc.returncode}"
+        return f"{out}\n\nexit: {proc.returncode}"
+    except asyncio.TimeoutError:
+        _scan_and_record_recent_files(start_time, run_cwd)
+        if proc and proc.returncode is None and _DEV_SERVER_CMD.search(cmd):
+            return (
+                f"OK: Dev server still running (pid={proc.pid}, timed out after {timeout}s). "
+                "Long-running servers like npm run dev / vite do not exit — this is success, not failure. "
+                "Default Vite URL: http://127.0.0.1:5173/ (or use the project's START_*.bat). "
+                "Do not retry the same dev command."
+            )
+        out = ""
+        err = ""
+        if proc and proc.returncode is None:
+            try:
+                proc.kill()
+                out_bytes, err_bytes = await asyncio.wait_for(proc.communicate(), timeout=3)
+                out = (out_bytes or b"").decode("utf-8", errors="replace").strip()
+                err = (err_bytes or b"").decode("utf-8", errors="replace").strip()
+            except Exception:
+                pass
+        combined = f"{out}\n{err}".strip()
+        if _DEV_SERVER_CMD.search(cmd) and _DEV_SERVER_READY.search(combined):
+            return (
+                f"OK: Dev server started (long-running — stopped after {timeout}s capture).\n"
+                f"{combined[:1200]}\n\n"
+                "To keep it running, use spawn_subagent or run the project's START_*.bat in a separate window."
+            )
+        return "Error: Command timed out"
+    except Exception as e:
+        _scan_and_record_recent_files(start_time, run_cwd)
+        return f"Error: {e}"
+
+
+async def list_processes(max_lines: int = 50) -> str:
+    """List running processes. Works on Windows and Unix."""
+    try:
+        if platform.system() == "Windows":
+            proc = await asyncio.create_subprocess_shell(
+                'powershell -NoProfile -Command "Get-Process | Select-Object Name, Id, CPU, WorkingSet | Sort-Object CPU -Descending | Format-Table -AutoSize"',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                "ps aux",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        out, err = await proc.communicate()
+        text = (out or b"").decode("utf-8", errors="replace").strip()
+        if err:
+            err_text = (err or b"").decode("utf-8", errors="replace").strip()
+            if err_text and "Error" in err_text:
+                # Fallback: tasklist on Windows
+                if platform.system() == "Windows":
+                    proc2 = await asyncio.create_subprocess_shell(
+                        "tasklist /FO TABLE",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    out2, _ = await proc2.communicate()
+                    text = (out2 or b"").decode("utf-8", errors="replace").strip()
+                else:
+                    return f"Error: {err_text}"
+        lines = text.splitlines()
+        if max_lines and len(lines) > max_lines:
+            lines = lines[:max_lines]
+            text = "\n".join(lines) + f"\n... ({max_lines} of many shown)"
+        return text
+    except Exception as e:
+        return f"Error listing processes: {e}"
+
+
+async def is_process_running(name: str) -> str:
+    """Check if a process is running by name (case-insensitive, partial match). Returns PID(s) or 'not found'."""
+    try:
+        if platform.system() == "Windows":
+            cmd = f'powershell -NoProfile -Command "Get-Process | Where-Object {{ $_.ProcessName -like \'*{name}*\' }} | Select-Object Name, Id | Format-Table -AutoSize"'
+        else:
+            cmd = f"pgrep -fl {name}" if name else "echo 'provide name'"
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await proc.communicate()
+        text = (out or b"").decode("utf-8", errors="replace").strip()
+        if not text or "Error" in (err or b"").decode("utf-8", errors="replace"):
+            return f"Process matching '{name}': not found"
+        return f"Process matching '{name}':\n{text}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+async def get_system_info() -> str:
+    """Get basic system info."""
+    return (
+        f"OS: {platform.system()} {platform.release()}\n"
+        f"Machine: {platform.machine()}\n"
+        f"User: {os.environ.get('USERNAME', os.environ.get('USER', 'unknown'))}\n"
+        f"CWD: {os.getcwd()}"
+    )
+
+
+def _scan_and_record_recent_files(start_timestamp: float, root_dir: str | Path) -> None:
+    try:
+        from src.artifact_memory import record_artifact
+        from config.settings import PROJECT_ROOT
+        root_path = Path(root_dir).resolve()
+        
+        # Only scan if root_path is within PROJECT_ROOT
+        if PROJECT_ROOT.resolve() not in root_path.parents and root_path.resolve() != PROJECT_ROOT.resolve():
+            root_path = PROJECT_ROOT.resolve()
+            
+        exclude_dirs = {".git", "__pycache__", ".pytest_cache", "data", "node_modules", "logs", ".gemini"}
+        for root, dirs, files in os.walk(root_path):
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            for file in files:
+                file_path = Path(root) / file
+                try:
+                    stat = file_path.stat()
+                    if stat.st_mtime >= start_timestamp:
+                        record_artifact(
+                            str(file_path),
+                            title=file_path.name,
+                            summary="Automatically recorded post run_command execution.",
+                            source="run_command_monitor"
+                        )
+                except Exception:
+                    pass
+    except Exception:
+        pass

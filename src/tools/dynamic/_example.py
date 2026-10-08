@@ -1,0 +1,3 @@
+# Example dynamic tool - safe to delete. Format:
+# TOOL_DEF = {"name": "...", "description": "...", "parameters": {...}}
+# async def run(**kwargs) -> str: ...

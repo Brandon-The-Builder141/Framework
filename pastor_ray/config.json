@@ -1,0 +1,28 @@
+{
+  "guild_id": 1520464796263383222,
+  "owner_id": 531896743063846943,
+  "text_channel_id": 1552069960665407559,
+  "voice_channel_id": 1521560667105267824,
+  "public_context_channel_ids": [
+    1552069960665407559,
+    1520464797072621632
+  ],
+  "music_controller_ids": [
+    531896743063846943,
+    550782786013757442
+  ],
+  "timezone": "America/New_York",
+  "prayer_hours": [
+    8,
+    13,
+    20
+  ],
+  "prayers_enabled": true,
+  "ollama_url": "http://127.0.0.1:11434",
+  "model": "joe-speedboat/Gemma-4-Uncensored-HauhauCS-Aggressive:e4b",
+  "review_model": "qwen2.5-coder:7b",
+  "volume": 0.35,
+  "fish_voice_id": "16f85c97afdd43619ad861d0315ebbc0",
+  "fish_model": "s2.1-pro-free",
+  "sermon_model": "qwen3:latest"
+}

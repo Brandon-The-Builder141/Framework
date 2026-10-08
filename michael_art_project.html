@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Generative Art Project</title>
+<style>
+  body, html {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: black;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="artCanvas"></canvas>
+<script>
+  const canvas = document.getElementById('artCanvas');
+  const ctx = canvas.getContext('2d');
+
+  let width, height;
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function randomColor() {
+    const r = Math.floor(Math.sin(Date.now() * 0.0005) * 127 + 128);
+    const g = Math.floor(Math.sin(Date.now() * 0.0007 + 2) * 127 + 128);
+    const b = Math.floor(Math.sin(Date.now() * 0.0009 + 4) * 127 + 128);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  let time = 0;
+  function draw() {
+    ctx.clearRect(0, 0, width, height);
+
+    for(let i = 0; i < 50; i++) {
+      const x = width/2 + Math.sin(time + i) * 200;
+      const y = height/2 + Math.cos(time + i) * 200;
+      ctx.beginPath();
+      ctx.arc(x, y, 20 + 10 * Math.sin(time * 2 + i), 0, Math.PI * 2);
+      ctx.fillStyle = randomColor();
+      ctx.fill();
+    }
+
+    time += 0.02;
+    requestAnimationFrame(draw);
+  }
+  draw();
+</script>
+</body>
+</html>

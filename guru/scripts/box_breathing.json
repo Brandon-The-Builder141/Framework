@@ -1,0 +1,22 @@
+{
+  "name": "box_breathing",
+  "title": "Box Breathing",
+  "duration_minutes": 5,
+  "segments": [
+    {"type": "speech", "text": "Welcome. Sit comfortably. We'll practice box breathing together."},
+    {"type": "pause", "seconds": 5},
+    {"type": "speech", "text": "Inhale slowly for four counts."},
+    {"type": "pause", "seconds": 10},
+    {"type": "speech", "text": "Hold gently for four."},
+    {"type": "pause", "seconds": 10},
+    {"type": "speech", "text": "Exhale smoothly for four."},
+    {"type": "pause", "seconds": 10},
+    {"type": "speech", "text": "Hold empty for four. That's one box."},
+    {"type": "pause", "seconds": 10},
+    {"type": "speech", "text": "Again. Inhale four. Hold four. Exhale four. Hold four."},
+    {"type": "pause", "seconds": 40},
+    {"type": "speech", "text": "Let your shoulders drop. Stay with the rhythm."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "When you're ready, open your eyes. Well done."}
+  ]
+}

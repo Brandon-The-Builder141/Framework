@@ -1,0 +1,33 @@
+{
+  "name": "deep_sleep",
+  "title": "Deep Sleep",
+  "duration_minutes": 15,
+  "explicit_only": true,
+  "segments": [
+    {"type": "speech", "text": "Lie down, and let your whole body grow still. There is nothing left for you to do tonight but rest."},
+    {"type": "pause", "seconds": 12},
+    {"type": "speech", "text": "Breathe in slowly through your nose. And let it go, soft and long."},
+    {"type": "pause", "seconds": 18},
+    {"type": "speech", "text": "With each breath, you are sinking. Down, and down, into the quiet."},
+    {"type": "pause", "seconds": 25},
+    {"type": "speech", "text": "Picture a calm, dark place. Still water under a night sky. Nothing stirring."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "You float there, weightless, held. Safe in the dark."},
+    {"type": "pause", "seconds": 35},
+    {"type": "speech", "text": "Let your breath grow slower. There is no rush. Time has gone soft."},
+    {"type": "pause", "seconds": 40},
+    {"type": "speech", "text": "Every muscle releasing. Every thought dissolving into the water."},
+    {"type": "pause", "seconds": 45},
+    {"type": "speech", "text": "Heavier now. Warmer. Drifting further from the day behind you."},
+    {"type": "pause", "seconds": 50},
+    {"type": "speech", "text": "If your mind wanders, that's alright. Let it wander itself to sleep."},
+    {"type": "pause", "seconds": 55},
+    {"type": "speech", "text": "You are deeply calm. Deeply safe. Carried on slow, dark water."},
+    {"type": "pause", "seconds": 60},
+    {"type": "speech", "text": "Nothing to reach for. Nothing to fix. Only this quiet, only this rest."},
+    {"type": "pause", "seconds": 60},
+    {"type": "speech", "text": "Let the last of your waking thoughts fade out, like a light dimming low."},
+    {"type": "pause", "seconds": 70},
+    {"type": "speech", "text": "Rest now, completely. I'll hold the silence. Sleep deeply, and sleep well."}
+  ]
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "file": "pastor-ray-A-andrew.mp3",
+    "voice": "en-US-AndrewNeural",
+    "rate": "-8%",
+    "seconds": 72.3,
+    "bytes": 1157037
+  },
+  {
+    "file": "pastor-ray-B-brian.mp3",
+    "voice": "en-US-BrianNeural",
+    "rate": "-8%",
+    "seconds": 78.5,
+    "bytes": 1257261
+  }
+]

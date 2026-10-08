@@ -1,0 +1,6 @@
+discord.py[voice]>=2.3,<3
+httpx>=0.26,<1
+python-dotenv>=1,<2
+tzdata>=2025.1
+edge-tts>=7.2.8,<8
+faster-whisper>=1.1,<2

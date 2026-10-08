@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "solen",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py"],
+      "port": 8765
+    }
+  ]
+}

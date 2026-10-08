@@ -1,0 +1,31 @@
+{
+  "name": "rain_sleep",
+  "title": "Sleep in the Rain",
+  "duration_minutes": 10,
+  "explicit_only": true,
+  "segments": [
+    {"type": "speech", "text": "Let yourself settle in, and imagine you are warm and dry in your bed, while outside a soft rain begins to fall."},
+    {"type": "pause", "seconds": 12},
+    {"type": "speech", "text": "Listen. The first gentle drops against the window. Steady, and slow."},
+    {"type": "pause", "seconds": 20},
+    {"type": "speech", "text": "There is nowhere you need to be. The rain has the whole night to fall, and you have the whole night to rest."},
+    {"type": "pause", "seconds": 25},
+    {"type": "speech", "text": "Breathe in slowly. And let your breath out like a long, soft sigh."},
+    {"type": "pause", "seconds": 25},
+    {"type": "speech", "text": "Feel the rhythm of the rain on the roof. Soft, and even. Asking nothing of you."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Let your body grow heavy beneath the blankets. Warm, and safe, and still."},
+    {"type": "pause", "seconds": 35},
+    {"type": "speech", "text": "Each drop carries a little of the day away. Washing it down, and out, and gone."},
+    {"type": "pause", "seconds": 40},
+    {"type": "speech", "text": "The rain blurs the world outside into a soft, grey hush. Nothing sharp. Nothing urgent."},
+    {"type": "pause", "seconds": 45},
+    {"type": "speech", "text": "Let your thoughts dissolve into the sound, until there is only the rain, and your slow, easy breath."},
+    {"type": "pause", "seconds": 50},
+    {"type": "speech", "text": "Warm beneath the covers. Held by the quiet. Carried by the rain."},
+    {"type": "pause", "seconds": 55},
+    {"type": "speech", "text": "Let it lull you down, deeper and deeper, into sleep."},
+    {"type": "pause", "seconds": 60},
+    {"type": "speech", "text": "Rest now. Let the rain keep watch. Sleep well."}
+  ]
+}

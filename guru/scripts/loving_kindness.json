@@ -1,0 +1,18 @@
+{
+  "name": "loving_kindness",
+  "title": "Loving-Kindness",
+  "duration_minutes": 7,
+  "segments": [
+    {"type": "speech", "text": "Settle in. This is loving-kindness meditation."},
+    {"type": "pause", "seconds": 8},
+    {"type": "speech", "text": "Bring kindness toward yourself. May I be safe. May I be peaceful."},
+    {"type": "pause", "seconds": 25},
+    {"type": "speech", "text": "Picture someone you care about. May you be safe. May you be well."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Expand to everyone in your home. May we be at ease together."},
+    {"type": "pause", "seconds": 30},
+    {"type": "speech", "text": "Include yourself again. You deserve the same warmth you offer others."},
+    {"type": "pause", "seconds": 20},
+    {"type": "speech", "text": "Gently return. Carry a little softness with you."}
+  ]
+}

@@ -1,0 +1,66 @@
+.env
+__pycache__/
+*.pyc
+data/
+logs/
+process_log.txt
+generated_images/
+.venv/
+venv/
+*.egg-info/
+
+# Personal user content (Travis's schedule, Andrew's journey notes, bug reports, etc.)
+projects/
+project_folder/
+organized/
+claude/
+memory-core/
+models/
+huggingface/
+adapters/
+
+# Vendored third-party code with its own .git history
+vendor/
+
+# Local-only smoke / scratch scripts
+_smoke_*.py
+_check_*.py
+
+# Pastor Ray runtime and downloaded recordings (metadata remains tracked)
+pastor_ray/audio/
+pastor_ray/voice_sidecar/node_modules/
+
+# Local secrets, runtime data, dependencies, and backups
+.env*
+!.env.example
+!.env.sample
+!.env.template
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+*.db
+*.sqlite*
+*.zip
+
+# Local conversation and agent state
+guru/garth_memory/
+guru/guru_logs/
+guru/guru_profile.json
+memory/
+.voidcode/
+.voidcode-memory.md
+andrew's projects/
+Andrew/memory/moments.md
+Andrew/memory/people.md
+Andrew/memory/projects.md
+knowledge/contacts.md
+knowledge/artifact_memory.md
+knowledge/schedule_memory.md
+vex_ledger.json
+Pastor ray
+
+# Local audit report contains credential captures
+AUDIT.md
