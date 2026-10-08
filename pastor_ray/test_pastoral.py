@@ -27,7 +27,7 @@ class PastoralTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['on_section']('Exact reading',2)
             await asyncio.wait_for(played.wait(),1)
             await kwargs['on_section']('Closing prayer',3)
-        bot=S(brain=S(),public_context=AsyncMock(return_value=[]))
+        bot=S(brain=S(),public_context=AsyncMock(return_value=[]),guild_config=lambda gid: S(guild_id=gid,voice_channel_id=1,text_channel_id=2))
         session=SermonSession(bot,1)
         session.topic='morning'
         session.announce=AsyncMock()
@@ -41,7 +41,7 @@ class PastoralTests(unittest.IsolatedAsyncioTestCase):
     async def test_stopping_cancels_producer_with_full_buffer(self):
         async def build(brain,topic,minutes,**kwargs):
             for i in range(20): await kwargs['on_section']('section',i)
-        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[])),1)
+        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[]),guild_config=lambda gid: S(guild_id=gid,voice_channel_id=1,text_channel_id=2)),1)
         session.announce=AsyncMock()
         async def hold(path): await asyncio.Event().wait()
         session.play=hold
@@ -58,7 +58,7 @@ class PastoralTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['on_section']('Reading',2)
         async def synth(text,path):ready.append(text)
         async def play(path):self.assertEqual(ready,['Welcome','Reading'])
-        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[])),1)
+        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[]),guild_config=lambda gid: S(guild_id=gid,voice_channel_id=1,text_channel_id=2)),1)
         session.announce=AsyncMock();session.play=play;session.set_listening=AsyncMock()
         with tempfile.TemporaryDirectory() as folder,patch('pastor_ray.sermons.plan_service',AsyncMock(return_value={'title':'Title','sources':[]})),patch('pastor_ray.sermons.build_service',build),patch('pastor_ray.sermons.synthesize',synth):
             await asyncio.wait_for(session.stream_service(20,folder),2)
@@ -68,7 +68,7 @@ class PastoralTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['on_section']('Opening',1)
             await kwargs['on_section']('Reading',2)
             raise RuntimeError('generation failed')
-        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[])),1)
+        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[]),guild_config=lambda gid: S(guild_id=gid,voice_channel_id=1,text_channel_id=2)),1)
         session.announce=AsyncMock();session.play=AsyncMock();session.set_listening=AsyncMock()
         with tempfile.TemporaryDirectory() as folder,patch('pastor_ray.sermons.plan_service',AsyncMock(return_value={'title':'Title','sources':[]})),patch('pastor_ray.sermons.build_service',build),patch('pastor_ray.sermons.synthesize',AsyncMock()):
             with self.assertRaisesRegex(RuntimeError,'generation failed'):
@@ -89,7 +89,7 @@ class PastoralTests(unittest.IsolatedAsyncioTestCase):
             await kwargs['on_section']('second',2)
         async def synth(text,path):
             await asyncio.wait_for(second_written.wait(),1)
-        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[])),1)
+        session=SermonSession(S(brain=S(),public_context=AsyncMock(return_value=[]),guild_config=lambda gid: S(guild_id=gid,voice_channel_id=1,text_channel_id=2)),1)
         session.announce=AsyncMock();session.play=AsyncMock();session.set_listening=AsyncMock()
         with tempfile.TemporaryDirectory() as folder,patch('pastor_ray.sermons.plan_service',AsyncMock(return_value={'title':'Title','sources':[]})),patch('pastor_ray.sermons.build_service',build),patch('pastor_ray.sermons.synthesize',synth):
             await asyncio.wait_for(session.stream_service(20,folder),2)

@@ -264,7 +264,7 @@ class SermonSession:
             self.gate.set()
         try:
             if text is None:
-                text=await asyncio.wait_for(self.bot.brain.prayer(topic,await self.bot.public_context(),self.bot.store.public_requests()),120)
+                text=await asyncio.wait_for(self.bot.brain.prayer(topic,await self.bot.public_context(self.gcfg),self.bot.store.public_requests(self.guild_id)),120)
             with tempfile.TemporaryDirectory(prefix='ray-prayer-') as folder:
                 path=Path(folder)/'prayer.mp3'
                 await synthesize(text,path)
@@ -430,7 +430,7 @@ class SermonSession:
     async def stream_service(self,minutes,folder,before_play=None):
         """Bounded producer: start real teaching before the full service is generated."""
         log.info('Service planning started')
-        public=await asyncio.wait_for(self.bot.public_context(),20)
+        public=await asyncio.wait_for(self.bot.public_context(self.gcfg),20)
         plan=await asyncio.wait_for(plan_service(self.bot.brain,self.topic,public),120)
         self.sources=plan['sources']
         log.info('Service plan validated: %s verses',len(self.sources))
