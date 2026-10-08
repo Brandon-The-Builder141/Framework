@@ -5,7 +5,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 from pastor_ray.sermons import SermonSession, intent, parse_topic, build_sermon
 from pastor_ray.bot import Ray
-from pastor_ray.settings import load_config
+from pastor_ray.guild_config import GuildConfig
+from pastor_ray.settings import load_config, load_globals
+
+
+def make_gcfg(cfg):
+    return GuildConfig(
+        guild_id=cfg["guild_id"], text_channel_id=cfg["text_channel_id"],
+        voice_channel_id=cfg["voice_channel_id"], timezone=cfg.get("timezone", "America/New_York"),
+        prayer_hours=list(cfg.get("prayer_hours", [8, 13, 20])),
+        public_context_channel_ids=list(cfg.get("public_context_channel_ids", [])),
+        music_controller_ids=list(cfg.get("music_controller_ids", [])))
 
 
 class RoutingTests(unittest.TestCase):
@@ -25,15 +35,21 @@ class RoutingTests(unittest.TestCase):
 
 class SessionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        self.cfg=load_config()
         self.channel=MagicMock(spec=discord.VoiceChannel)
         self.channel.send=AsyncMock()
         self.fake_voice=MagicMock()
         self.fake_voice.disconnect=AsyncMock()
         self.channel.connect=AsyncMock(return_value=self.fake_voice)
-        self.bot=SimpleNamespace(cfg=load_config(),user=SimpleNamespace(id=999),
+        self.bot=SimpleNamespace(cfg=self.cfg,globals=load_globals(self.cfg),user=SimpleNamespace(id=999),
             get_channel=lambda _:self.channel,brain=SimpleNamespace(complete=AsyncMock(return_value='A thoughtful answer.')),
-            choir=SimpleNamespace(another_bot=lambda *a:False,stop=AsyncMock(),start=AsyncMock(return_value='music started')))
-        self.session=SermonSession(self.bot)
+            guild_config=lambda gid:make_gcfg(self.cfg),
+            primary_guild_for=AsyncMock(return_value=None),member=AsyncMock(return_value=None),
+            sermon_for=lambda gid:self.session,choir_for=lambda gid:self.bot.choir,
+            _handle_setup_answer=AsyncMock(return_value=False),
+            user_locks={},pending_chats=0,public_chat=AsyncMock())
+        self.bot.choir=SimpleNamespace(another_bot=lambda *a:False,stop=AsyncMock(),start=AsyncMock(return_value='music started'))
+        self.session=SermonSession(self.bot,self.cfg["guild_id"])
         self.session.transcriber.ready=MagicMock()
         self.bot.sermon=self.session
 
@@ -89,8 +105,8 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.session.state,'idle')
 
     async def test_collision_blocks_start(self):
-        self.bot.choir.another_bot=lambda *a:True
-        self.assertIn('Another bot',await self.session.start('faith'))
+        with patch('pastor_ray.sermons.Choir.another_bot',return_value=True):
+            self.assertIn('Another bot',await self.session.start('faith'))
         self.assertFalse(self.session.active)
 
     async def test_pause_resume_controls_audio(self):
@@ -113,9 +129,9 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_choir_conflict_and_end_resume(self):
         self.session.state='questions'
         uid=self.bot.cfg['owner_id']
-        self.assertIn('session is active',await Ray.command(self.bot,uid,'play','',private=False))
+        self.assertIn('session is active',await Ray.command(self.bot,uid,'play','',private=False,guild_id=self.cfg['guild_id']))
         self.bot.choir.start.assert_not_called()
-        self.assertIn('music started',await Ray.command(self.bot,uid,'sermon','end choir',private=False))
+        self.assertIn('music started',await Ray.command(self.bot,uid,'sermon','end choir',private=False,guild_id=self.cfg['guild_id']))
 
     async def test_full_session_with_audio_failure_and_question(self):
         voice=MagicMock()
@@ -190,7 +206,7 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             guild=SimpleNamespace(id=self.bot.cfg['guild_id']),channel=channel,mentions=[],
             content='Ray, join Meditation Vibes and preach about forgiveness')
         await Ray.on_message(self.bot,message)
-        self.bot.command.assert_awaited_once_with(self.bot.cfg['owner_id'],'sermon','forgiveness',private=False)
+        self.bot.command.assert_awaited_once_with(self.bot.cfg['owner_id'],'sermon','forgiveness',private=False,guild_id=self.bot.cfg['guild_id'])
         self.bot.public_chat.assert_not_called()
 
     async def test_question_failure_allows_retry_and_session_stays_alive(self):
