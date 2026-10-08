@@ -1,0 +1,13 @@
+title = "Framework secret scan"
+[extend]
+useDefault = true
+
+# Discord snowflake IDs identify users; they cannot authenticate as them.
+# This exception is restricted to the config field and existing test fixture.
+[[allowlists]]
+description = "Non-secret Discord identifiers in configuration and tests"
+targetRules = ["discord-client-id"]
+condition = "AND"
+paths = ['^guru/guru_config\.json$', '^tests/test_contacts\.py$']
+regexTarget = "line"
+regexes = ['owner_discord_id|DISCORD_OWNER_ID|discord_id=']
