@@ -93,4 +93,4 @@ Built with you, for this exact purpose.
 
 ## Desktop source snapshot
 
-This repository contains the current source from the desktop Framework folder, including the Pastor Ray module. Local credentials, conversation memories, runtime logs and databases, downloaded recordings, dependency directories, and the credential-bearing local audit report are excluded. Configure local environment values before running. The original desktop folder and its Git history are unchanged.
+This repository contains the current source from the desktop Framework folder, including the Pastor Ray module. Local credentials, conversation memories, runtime logs and databases, Pastor Ray runtime recordings, dependency directories, and the credential-bearing local audit report are excluded. Configure local environment values before running. The original desktop folder and its Git history are unchanged.
