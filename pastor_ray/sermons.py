@@ -14,6 +14,7 @@ from pastor_ray.speech import fish_speech
 
 from pastor_ray.brain import PERSONA
 from pastor_ray.scripture import context, passages
+from pastor_ray.music import Choir
 from pastor_ray.node_voice import NodeVoice
 from pastor_ray.listening import Transcriber, addressed_question
 from pastor_ray.services import build_service, SERVICE_PERSONA, review_section, passage_context
@@ -197,8 +198,11 @@ async def synthesize(text, path):
 
 
 class SermonSession:
-    def __init__(self, bot):
+    """One voice session per guild. Ray holds one of these per server in
+    ``bot.sermon_sessions``; two guilds never share a voice connection."""
+    def __init__(self, bot, guild_id):
         self.bot = bot
+        self.guild_id = int(guild_id)
         self.state = 'idle'
         self.task = None
         self.voice = None
@@ -229,11 +233,18 @@ class SermonSession:
         self.followup_until=0
 
     @property
+    def gcfg(self):
+        gcfg = self.bot.guild_config(self.guild_id)
+        if gcfg is None:
+            raise RuntimeError(f"Guild {self.guild_id} is not configured")
+        return gcfg
+
+    @property
     def active(self):
         return self.state != 'idle'
 
     async def announce(self,text):
-        channel = self.bot.get_channel(self.bot.cfg['voice_channel_id'])
+        channel = self.bot.get_channel(self.gcfg.voice_channel_id)
         if channel:
             for offset in range(0,len(text),1900):
                 await channel.send(text[offset:offset+1900],allowed_mentions=discord.AllowedMentions.none())
@@ -257,12 +268,12 @@ class SermonSession:
             with tempfile.TemporaryDirectory(prefix='ray-prayer-') as folder:
                 path=Path(folder)/'prayer.mp3'
                 await synthesize(text,path)
-                channel=self.bot.get_channel(self.bot.cfg['voice_channel_id'])
+                channel=self.bot.get_channel(self.gcfg.voice_channel_id)
                 if not isinstance(channel,discord.VoiceChannel):
                     raise RuntimeError('Voice channel unavailable')
-                if self.bot.choir.another_bot(channel,self.bot.user.id):
+                if Choir.another_bot(channel,self.bot.user.id):
                     raise RuntimeError('Another bot is speaking in voice')
-                await self.bot.choir.stop()
+                await self.bot.choir_for(self.guild_id).stop()
                 self.voice=await channel.connect(timeout=40,reconnect=True,cls=NodeVoice,self_deaf=False)
                 # Prayers are brief visits, with no microphone subscription or Q&A.
                 await asyncio.gather(publish(text) if publish else self.announce('**Prayer · Pastor Ray**\n\n'+text),self.play(path))
@@ -288,10 +299,10 @@ class SermonSession:
                 topic,minutes = parse_topic(args)
             except ValueError as exc:
                 return str(exc)
-            channel = self.bot.get_channel(self.bot.cfg['voice_channel_id'])
+            channel = self.bot.get_channel(self.gcfg.voice_channel_id)
             if not isinstance(channel,discord.VoiceChannel):
                 return 'Meditation Vibes is unavailable.'
-            if self.bot.choir.another_bot(channel,self.bot.user.id):
+            if Choir.another_bot(channel,self.bot.user.id):
                 return 'Another bot is in Meditation Vibes. Have Garth leave first so we do not speak over each other.'
             self.topic,self.state = topic,'preparing'
             self.transcript,self.sources,self.history = '',[],[]
@@ -498,7 +509,7 @@ class SermonSession:
 
     async def connect_voice(self,channel,readiness=None):
         if readiness:await readiness
-        if self.bot.choir.another_bot(channel,self.bot.user.id):
+        if Choir.another_bot(channel,self.bot.user.id):
             raise RuntimeError('Another bot joined the channel')
         self.voice=await channel.connect(timeout=40,reconnect=True,cls=NodeVoice,self_deaf=False)
         if isinstance(self.voice,NodeVoice):self.voice.on_utterance=self.receive_utterance
@@ -513,9 +524,9 @@ class SermonSession:
         try:
             with contextlib.nullcontext(files.name) as folder:
                 path = Path(folder)/'speech.mp3'
-                await self.bot.choir.stop()
-                channel = self.bot.get_channel(self.bot.cfg['voice_channel_id'])
-                if self.bot.choir.another_bot(channel,self.bot.user.id):
+                await self.bot.choir_for(self.guild_id).stop()
+                channel = self.bot.get_channel(self.gcfg.voice_channel_id)
+                if Choir.another_bot(channel,self.bot.user.id):
                     raise RuntimeError('Another bot joined the channel')
                 if self.topic!='conversation' and minutes>=10:
                     readiness=asyncio.create_task(self.prepare_transcription())
@@ -658,7 +669,7 @@ class SermonSession:
                 if question:
                     action=re.sub(r'[.!?]','',question.lower()).strip()
                     controls={'stop':'end','stop sermon':'end','end sermon':'end','pause':'pause','pause sermon':'pause'}
-                    if action in controls and uid in {self.bot.cfg['owner_id'],*self.bot.cfg['music_controller_ids']}:
+                    if action in controls and uid in {self.bot.globals['owner_id'],*self.gcfg.music_controller_ids}:
                         asyncio.create_task(self.control(controls[action]))
                         continue
                     if self.interrupting and self.followup_uid!=uid:
