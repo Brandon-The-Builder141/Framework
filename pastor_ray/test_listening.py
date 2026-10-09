@@ -31,7 +31,10 @@ class SpeechTests(unittest.TestCase):
 
 class ListeningTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.session=SermonSession(SimpleNamespace(cfg={'owner_id':1,'music_controller_ids':[]}))
+        from pastor_ray.guild_config import GuildConfig
+        gcfg=GuildConfig(guild_id=1,music_controller_ids=[])
+        bot=SimpleNamespace(globals={'owner_id':1},guild_config=lambda gid:gcfg)
+        self.session=SermonSession(bot,1)
         self.session.announce=AsyncMock()
         self.session.transcriber.transcribe=MagicMock(return_value='Ray, what does forgiveness mean?')
 

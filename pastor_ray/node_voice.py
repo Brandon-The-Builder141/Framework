@@ -60,7 +60,7 @@ class NodeVoice(discord.VoiceProtocol):
                 elif message.get('event')=='gateway':
                     await self.client.ws.send_as_json(message['payload'])
                 elif message.get('event')=='connection':
-                    log.info('Node voice state: %s',message['state'])
+                    log.info('Node voice state: guild=%s channel=%s state=%s',self.channel.guild.id,self.channel.id,message['state'])
                     self.connected=message['state']=='ready'
                     if message['state'] in ('destroyed','disconnected'):
                         self.error='Voice connection lost'
@@ -121,7 +121,10 @@ class NodeVoice(discord.VoiceProtocol):
     async def start_file(self,path,offset=0):
         self.finished.clear()
         self.error=None
-        await self.request('play',path=str(path),offset=offset)
+        result=await self.request('play',path=str(path),offset=offset)
+        if not result.get('packetsSent',0):
+            raise RuntimeError('Voice audio transport did not send packets')
+        log.info('Voice transport active: guild=%s channel=%s packets=%s',self.channel.guild.id,self.channel.id,result['packetsSent'])
 
     async def wait_finished(self):
         await self.finished.wait()

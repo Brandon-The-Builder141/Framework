@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from pastor_ray.sermons import SermonSession,intent
 from pastor_ray.bot import Ray
+from pastor_ray.guild_config import GuildConfig
 
 
 class VoiceFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -32,7 +33,7 @@ class VoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         async def resume_file(*args,**kwargs): ended.set()
         voice=SimpleNamespace(wait_finished=wait_finished,request=AsyncMock(return_value={'seconds':42}),start_file=AsyncMock(side_effect=resume_file))
         bot=SimpleNamespace(brain=SimpleNamespace(complete=AsyncMock(return_value='Forgiveness does not mean abandoning boundaries.')))
-        session=SermonSession(bot)
+        session=SermonSession(bot,1)
         session.voice=voice
         session.state='preaching'
         session.last_spoken='Original sermon'
@@ -53,7 +54,7 @@ class VoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         ended=asyncio.Event()
         async def finish(): await ended.wait()
         async def resume_file(*args,**kwargs): ended.set()
-        session=SermonSession(SimpleNamespace())
+        session=SermonSession(SimpleNamespace(),1)
         session.voice=SimpleNamespace(wait_finished=finish,request=AsyncMock(return_value={'seconds':8}),start_file=AsyncMock(side_effect=resume_file))
         session.answer=AsyncMock(side_effect=RuntimeError('model offline'))
         session.announce=AsyncMock()
@@ -64,7 +65,7 @@ class VoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         session.voice.start_file.assert_awaited_once_with(Path('sermon.mp3'),offset=7)
 
     async def test_name_only_invites_question(self):
-        session=SermonSession(SimpleNamespace())
+        session=SermonSession(SimpleNamespace(),1)
         self.assertIn('Go ahead',await session.answer('__attention__'))
 
     async def test_prayer_publishes_speaks_and_disconnects_without_listening(self):
@@ -73,8 +74,10 @@ class VoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         voice=MagicMock()
         voice.disconnect=AsyncMock()
         channel.connect=AsyncMock(return_value=voice)
-        bot=SimpleNamespace(cfg={'voice_channel_id':1},get_channel=lambda _:channel,user=SimpleNamespace(id=2),choir=SimpleNamespace(another_bot=lambda *a:False,stop=AsyncMock()))
-        session=SermonSession(bot)
+        gcfg=GuildConfig(guild_id=1,voice_channel_id=1,text_channel_id=4)
+        bot=SimpleNamespace(globals={'owner_id':1},get_channel=lambda _:channel,user=SimpleNamespace(id=2),
+            guild_config=lambda gid:gcfg,choir_for=lambda gid:SimpleNamespace(stop=AsyncMock()))
+        session=SermonSession(bot,1)
         session.play=AsyncMock()
         publish=AsyncMock()
         with patch('pastor_ray.sermons.synthesize',AsyncMock()):
@@ -87,8 +90,11 @@ class VoiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(session.listening)
 
     async def test_conversation_command_reuses_host_gate(self):
+        gcfg=GuildConfig(guild_id=1,text_channel_id=4,voice_channel_id=2)
         session=SimpleNamespace(start=AsyncMock(return_value='joining'))
-        bot=SimpleNamespace(sermon=session,cfg={'owner_id':1,'music_controller_ids':[]})
+        bot=SimpleNamespace(globals={'owner_id':1},
+            primary_guild_for=AsyncMock(return_value=gcfg),
+            sermon_for=lambda gid:session,choir_for=lambda gid:SimpleNamespace())
         self.assertIn('Only Brandon',await Ray.command(bot,2,'talk','',private=True))
         self.assertEqual(await Ray.command(bot,1,'talk','',private=True),'joining')
         session.start.assert_awaited_once_with('conversation')

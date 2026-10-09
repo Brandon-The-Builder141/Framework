@@ -3,6 +3,7 @@ const readline = require('node:readline');
 const {createAudioPlayer, joinVoiceChannel, entersState,
   VoiceConnectionStatus, AudioPlayerStatus, EndBehaviorType} = require('@discordjs/voice');
 const {speechResource}=require('./audio.cjs');
+const {verifyTransport}=require('./transport.cjs');
 const prism = require('prism-media');
 let connection, adapter;
 let allowed = new Set(), listening = false, epoch = 0;
@@ -81,12 +82,20 @@ async function command(m) {
       return {listening,epoch};
     case 'play': {
       if (!connection || connection.state.status!==VoiceConnectionStatus.Ready) throw Error('not-connected');
+      const voiceState=connection.packets.state;
+      if (voiceState?.mute || voiceState?.self_mute || voiceState?.suppress) throw Error('voice-muted-or-suppressed');
       if (!listening) discardCaptures();
       baseOffset=Number(m.offset || 0);
       const resource=speechResource(m.path,baseOffset);
       player.play(resource);
       await entersState(player,AudioPlayerStatus.Playing,20000);
-      return {playing:true};
+      try {
+        const packetsSent=await verifyTransport(connection);
+        return {playing:true,packetsSent};
+      } catch(error) {
+        player.stop(true);
+        throw error;
+      }
     }
     case 'position': return {seconds:baseOffset+(player.state.resource?.playbackDuration || 0)/1000};
     case 'pause': player.pause();discardCaptures();return {};
@@ -107,7 +116,8 @@ lines.on('line',line=>{
   try { m=JSON.parse(line); } catch { return; }
   // Gateway updates must run while the connect request is waiting for Ready.
   command(m).then(result=>{if(m.id) emit({id:m.id,result});})
-    .catch(error=>{if(m.id) emit({id:m.id,error:'Voice sidecar '+m.command+' failed: '+error.name,
+    .catch(error=>{if(m.id) emit({id:m.id,error:'Voice sidecar '+m.command+' failed: '+
+      (['voice-muted-or-suppressed','voice-transport-unavailable','voice-transport-changed','voice-transport-no-packets'].includes(error.message)?error.message:error.name),
       diagnostic: String(error.stack || '').split('\n').slice(1,4).map(s=>s.trim())});});
 });
 lines.on('close',()=>{

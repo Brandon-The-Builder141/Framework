@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 from contextlib import closing
 
+from pastor_ray.guild_config import GuildConfig
+
 
 class Store:
     def __init__(self, path):
@@ -22,11 +24,16 @@ class Store:
                 id INTEGER PRIMARY KEY, uid TEXT NOT NULL, content TEXT);
             CREATE TABLE IF NOT EXISTS summaries (uid TEXT PRIMARY KEY, content TEXT);
             CREATE TABLE IF NOT EXISTS prayers (
-                slot TEXT PRIMARY KEY, state TEXT, message_id TEXT, detail TEXT);
+                guild_id TEXT NOT NULL, slot TEXT NOT NULL, state TEXT,
+                message_id TEXT, detail TEXT, PRIMARY KEY (guild_id, slot));
             CREATE TABLE IF NOT EXISTS requests (
-                uid TEXT PRIMARY KEY, content TEXT, expires REAL);
+                uid TEXT NOT NULL, guild_id TEXT NOT NULL, content TEXT,
+                expires REAL, PRIMARY KEY (uid, guild_id));
             CREATE TABLE IF NOT EXISTS outreach (
                 id INTEGER PRIMARY KEY, owner TEXT, target TEXT, sent REAL);
+            CREATE TABLE IF NOT EXISTS guilds (
+                guild_id TEXT PRIMARY KEY, config TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1);
         ''')
         columns = {r[1] for r in self.db.execute('PRAGMA table_info(turns)')}
         needs_index = not self.db.execute("SELECT 1 FROM sqlite_master WHERE name='turn_search'").fetchone()
@@ -155,26 +162,99 @@ class Store:
         for old in sorted(folder.glob('ray-*.sqlite3'))[:-14]:
             old.unlink()
 
-    def share_request(self, uid, content):
+    def share_request(self, uid, content, guild_id):
         with self.db:
-            self.db.execute("INSERT OR REPLACE INTO requests VALUES(?,?,?)", (str(uid), content[:800], time.time() + 7*86400))
+            self.db.execute("INSERT OR REPLACE INTO requests VALUES(?,?,?,?)",
+                            (str(uid), str(guild_id), content[:800], time.time() + 7*86400))
 
-    def public_requests(self):
-        return [r[0] for r in self.db.execute("SELECT content FROM requests WHERE expires>?", (time.time(),))]
+    def public_requests(self, guild_id):
+        return [r[0] for r in self.db.execute(
+            "SELECT content FROM requests WHERE guild_id=? AND expires>?", (str(guild_id), time.time()))]
 
-    def claim_prayer(self, slot):
+    def claim_prayer(self, guild_id, slot):
         # Claim before sending: ambiguous delivery is not retried automatically.
         with self.db:
-            cur = self.db.execute("INSERT OR IGNORE INTO prayers VALUES(?, 'claimed', NULL, '')", (slot,))
+            cur = self.db.execute("INSERT OR IGNORE INTO prayers VALUES(?, ?, 'claimed', NULL, '')",
+                                  (str(guild_id), slot))
             return cur.rowcount == 1
 
-    def prayer_result(self, slot, state, message_id="", detail=""):
+    def prayer_result(self, guild_id, slot, state, message_id="", detail=""):
         with self.db:
-            self.db.execute("UPDATE prayers SET state=?,message_id=?,detail=? WHERE slot=?", (state, str(message_id), detail, slot))
+            self.db.execute("UPDATE prayers SET state=?,message_id=?,detail=? WHERE guild_id=? AND slot=?",
+                            (state, str(message_id), detail, str(guild_id), slot))
 
-    def last_prayer(self):
-        row = self.db.execute("SELECT slot,state FROM prayers ORDER BY slot DESC LIMIT 1").fetchone()
+    def last_prayer(self, guild_id=None):
+        if guild_id is None:
+            row = self.db.execute("SELECT slot,state FROM prayers ORDER BY slot DESC LIMIT 1").fetchone()
+        else:
+            row = self.db.execute("SELECT slot,state FROM prayers WHERE guild_id=? ORDER BY slot DESC LIMIT 1",
+                                  (str(guild_id),)).fetchone()
         return dict(row) if row else None
+
+    # ---- multi-guild configuration ----
+
+    def upsert_guild(self, gcfg):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO guilds(guild_id, config, active) VALUES(?,?,1) "
+                "ON CONFLICT(guild_id) DO UPDATE SET config=excluded.config, active=1",
+                (str(gcfg.guild_id), gcfg.to_json()))
+
+    def get_guild(self, guild_id):
+        row = self.db.execute("SELECT config FROM guilds WHERE guild_id=?",
+                              (str(guild_id),)).fetchone()
+        return GuildConfig.from_row(guild_id, row[0]) if row else None
+
+    def active_guilds(self):
+        return [GuildConfig.from_row(r[0], r[1]) for r in
+                self.db.execute("SELECT guild_id, config FROM guilds WHERE active=1")]
+
+    def set_guild_active(self, guild_id, active):
+        with self.db:
+            self.db.execute("UPDATE guilds SET active=? WHERE guild_id=?",
+                            (1 if active else 0, str(guild_id)))
+
+    def seed_guild_from_legacy(self, raw_cfg):
+        """Seed the guilds table from a single-server config.json. Runs once;
+        existing rows are never overwritten, so a live server migrates with
+        zero downtime."""
+        if self.db.execute("SELECT COUNT(*) FROM guilds").fetchone()[0]:
+            return None
+        gcfg = GuildConfig(
+            guild_id=int(raw_cfg["guild_id"]),
+            text_channel_id=raw_cfg.get("text_channel_id"),
+            voice_channel_id=raw_cfg.get("voice_channel_id"),
+            timezone=raw_cfg.get("timezone", "America/New_York"),
+            prayer_hours=list(raw_cfg.get("prayer_hours", [8, 13, 20])),
+            prayers_enabled=bool(raw_cfg.get("prayers_enabled", True)),
+            public_context_channel_ids=list(raw_cfg.get("public_context_channel_ids", [])),
+            music_controller_ids=[int(x) for x in raw_cfg.get("music_controller_ids", [])],
+        )
+        self.upsert_guild(gcfg)
+        return gcfg
+
+    def migrate_guild_scoping(self, seed_guild_id):
+        """One-time migration of a pre-multiguild database. Idempotent: on a
+        fresh database (or an already-migrated one) this is a no-op."""
+        with self.db:
+            cols = {r[1] for r in self.db.execute("PRAGMA table_info(prayers)")}
+            if "guild_id" not in cols:
+                self.db.execute("ALTER TABLE prayers RENAME TO prayers_legacy")
+                self.db.execute("""CREATE TABLE prayers (
+                    guild_id TEXT NOT NULL, slot TEXT NOT NULL, state TEXT,
+                    message_id TEXT, detail TEXT, PRIMARY KEY (guild_id, slot))""")
+                self.db.execute("INSERT INTO prayers SELECT ?, slot, state, message_id, detail "
+                                "FROM prayers_legacy", (str(seed_guild_id),))
+                self.db.execute("DROP TABLE prayers_legacy")
+            cols = {r[1] for r in self.db.execute("PRAGMA table_info(requests)")}
+            if "guild_id" not in cols:
+                self.db.execute("ALTER TABLE requests RENAME TO requests_legacy")
+                self.db.execute("""CREATE TABLE requests (
+                    uid TEXT NOT NULL, guild_id TEXT NOT NULL, content TEXT,
+                    expires REAL, PRIMARY KEY (uid, guild_id))""")
+                self.db.execute("INSERT INTO requests SELECT uid, ?, content, expires "
+                                "FROM requests_legacy", (str(seed_guild_id),))
+                self.db.execute("DROP TABLE requests_legacy")
 
     def close(self):
         self.db.close()

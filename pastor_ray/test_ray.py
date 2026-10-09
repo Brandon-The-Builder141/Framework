@@ -8,12 +8,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 
 from pastor_ray.bot import Ray, music_allowed, owner_allowed
+from pastor_ray.guild_config import GuildConfig
 from pastor_ray.music import Choir
 from pastor_ray.schedule import due_slot, next_prayer
-from pastor_ray.settings import load_config
+from pastor_ray.settings import load_config, load_globals
 from pastor_ray.storage import Store
 from pastor_ray.scripture import passages, context
 from pastor_ray.music_intent import music_intent
+
+
+def make_gcfg(cfg, **overrides):
+    params = dict(
+        guild_id=cfg["guild_id"],
+        text_channel_id=cfg["text_channel_id"],
+        voice_channel_id=cfg["voice_channel_id"],
+        timezone=cfg.get("timezone", "America/New_York"),
+        prayer_hours=list(cfg.get("prayer_hours", [8, 13, 20])),
+        prayers_enabled=cfg.get("prayers_enabled", True),
+        public_context_channel_ids=list(cfg.get("public_context_channel_ids", [])),
+        music_controller_ids=list(cfg.get("music_controller_ids", [])),
+    )
+    params.update(overrides)
+    return GuildConfig(**params)
 
 
 class MusicIntentTests(unittest.TestCase):
@@ -45,20 +61,22 @@ class StorageTests(unittest.TestCase):
         self.store.summarize(1, "private summary")
         self.assertEqual(self.store.history(2), [])
         self.assertEqual(self.store.profile(2)["notes"], [])
-        self.assertEqual(self.store.public_requests(), [])
-        self.store.share_request(1, "Please pray for patience")
-        self.assertEqual(self.store.public_requests(), ["Please pray for patience"])
+        self.assertEqual(self.store.public_requests(7), [])
+        self.store.share_request(1, "Please pray for patience", 7)
+        self.assertEqual(self.store.public_requests(7), ["Please pray for patience"])
+        self.assertEqual(self.store.public_requests(8), [])
         self.store.forget(1)
         self.assertEqual(self.store.history(1), [])
         self.assertEqual(self.store.profile(1), {"notes": [], "conversation_summary": ""})
-        self.assertEqual(self.store.public_requests(), [])
+        self.assertEqual(self.store.public_requests(7), [])
 
     def test_prayer_claim_survives_restart(self):
-        self.assertTrue(self.store.claim_prayer("2026-09-22T08:00"))
+        self.assertTrue(self.store.claim_prayer(7, "2026-09-22T08:00"))
         self.store.close()
         self.store = Store(Path(self.temp.name)/"test.sqlite3")
-        self.assertFalse(self.store.claim_prayer("2026-09-22T08:00"))
-        self.assertTrue(self.store.claim_prayer("2026-09-22T13:00"))
+        self.assertFalse(self.store.claim_prayer(7, "2026-09-22T08:00"))
+        self.assertTrue(self.store.claim_prayer(7, "2026-09-22T13:00"))
+        self.assertTrue(self.store.claim_prayer(8, "2026-09-22T13:00"))
 
     def test_history_bounded_and_ordered(self):
         for i in range(30):
@@ -69,10 +87,10 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(history[0]["role"], "user")
 
     def test_requests_expire(self):
-        self.store.share_request(1, "old request")
+        self.store.share_request(1, "old request", 7)
         with self.store.db:
             self.store.db.execute("UPDATE requests SET expires=0")
-        self.assertEqual(self.store.public_requests(), [])
+        self.assertEqual(self.store.public_requests(7), [])
 
 
 class ScheduleTests(unittest.TestCase):
@@ -112,15 +130,39 @@ class ScriptureTests(unittest.TestCase):
 class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.cfg = load_config()
+        self.globals = load_globals(self.cfg)
+        self.gcfg = make_gcfg(self.cfg)
+
+    def fake_ray(self, **overrides):
+        gcfg = self.gcfg
+        fake = SimpleNamespace(
+            cfg=self.cfg,
+            globals=self.globals,
+            user=SimpleNamespace(id=999),
+            guild_config=lambda gid: gcfg if gid is not None and int(gid) == gcfg.guild_id else None,
+            primary_guild_for=AsyncMock(return_value=gcfg),
+            sermon_for=lambda gid: SimpleNamespace(active=False),
+            choir_for=lambda gid: SimpleNamespace(),
+            member=AsyncMock(),
+            _handle_setup_answer=AsyncMock(return_value=False),
+            user_locks={},
+            pending_chats=0,
+            public_content_enabled=True,
+            public_history={},
+            _setups={},
+        )
+        for key, value in overrides.items():
+            setattr(fake, key, value)
+        return fake
 
     async def test_nonowner_cannot_reachout(self):
-        fake = SimpleNamespace(cfg=self.cfg, member=AsyncMock())
+        fake = self.fake_ray()
         result = await Ray.command(fake, 550782786013757442, "reachout", "123 hello", private=True)
         self.assertIn("Only Brandon", result)
         fake.member.assert_not_called()
 
     async def test_private_commands_rejected_in_public(self):
-        fake = SimpleNamespace(cfg=self.cfg)
+        fake = self.fake_ray()
         for name in ("remember", "memory", "forget", "request", "unrequest"):
             result = await Ray.command(fake, self.cfg["owner_id"], name, "secret", private=False)
             self.assertIn("DM", result)
@@ -129,7 +171,8 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
         target = SimpleNamespace(id=42, bot=False, send=AsyncMock())
         tmp = tempfile.TemporaryDirectory()
         store = Store(Path(tmp.name)/"state.db")
-        fake = SimpleNamespace(cfg=self.cfg, member=AsyncMock(return_value=target), store=store)
+        store.seed_guild_from_legacy(self.cfg)
+        fake = self.fake_ray(store=store, member=AsyncMock(return_value=target))
         try:
             result = await Ray.command(fake, self.cfg["owner_id"], "reachout", "42 How are you?", private=True)
             self.assertIn("Sent", result)
@@ -139,15 +182,15 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
             tmp.cleanup()
 
     async def test_music_gate(self):
-        fake = SimpleNamespace(cfg=self.cfg)
+        fake = self.fake_ray()
         result = await Ray.command(fake, 42, "play", "", private=True)
         self.assertIn("limited", result)
 
     def test_no_empty_trust_fail_open(self):
-        cfg = {**self.cfg, "music_controller_ids": []}
-        self.assertFalse(music_allowed(42, cfg))
-        self.assertFalse(owner_allowed(42, cfg))
-        self.assertTrue(music_allowed(cfg["owner_id"], cfg))
+        gcfg = make_gcfg(self.cfg, music_controller_ids=[])
+        self.assertFalse(music_allowed(42, gcfg, self.globals))
+        self.assertFalse(owner_allowed(42, self.globals))
+        self.assertTrue(music_allowed(self.cfg["owner_id"], gcfg, self.globals))
 
     def test_voice_collision(self):
         channel = SimpleNamespace(members=[SimpleNamespace(bot=True,id=2)])
@@ -155,20 +198,20 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(Choir.another_bot(channel, 2))
 
     async def test_other_channels_do_not_trigger_ai(self):
-        fake = SimpleNamespace(cfg=self.cfg, user=SimpleNamespace(id=999), public_chat=AsyncMock())
+        fake = self.fake_ray(public_chat=AsyncMock())
         message = SimpleNamespace(author=SimpleNamespace(bot=False), content="Pastor Ray, hello", channel=SimpleNamespace(id=123), guild=SimpleNamespace(id=self.cfg["guild_id"]))
         await Ray.on_message(fake, message)
         fake.public_chat.assert_not_called()
 
     async def test_both_requested_channels_route_plain_messages(self):
-        fake = SimpleNamespace(cfg=self.cfg, user=SimpleNamespace(id=999), public_chat=AsyncMock())
+        fake = self.fake_ray(public_chat=AsyncMock())
         for channel_id in (self.cfg['voice_channel_id'], self.cfg['text_channel_id']):
             message = SimpleNamespace(author=SimpleNamespace(bot=False), content="Hello", channel=SimpleNamespace(id=channel_id), guild=SimpleNamespace(id=self.cfg['guild_id']), mentions=[])
             await Ray.on_message(fake, message)
         self.assertEqual(fake.public_chat.await_count, 2)
 
     async def test_natural_music_dispatches_real_command_before_ai(self):
-        fake = SimpleNamespace(cfg=self.cfg, user=SimpleNamespace(id=999),
+        fake = self.fake_ray(
             command=AsyncMock(return_value="The choir joined Meditation Vibes."), public_chat=AsyncMock())
         for channel_id in (self.cfg['voice_channel_id'], self.cfg['text_channel_id']):
             channel = MagicMock()
@@ -177,7 +220,7 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
             channel.typing.return_value = MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())
             message = SimpleNamespace(author=SimpleNamespace(bot=False,id=self.cfg['owner_id']), content="Join and play the choir", channel=channel, guild=SimpleNamespace(id=self.cfg['guild_id']), mentions=[])
             await Ray.on_message(fake, message)
-            fake.command.assert_awaited_with(self.cfg['owner_id'], "play", "", private=False)
+            fake.command.assert_awaited_with(self.cfg['owner_id'], "play", "", private=False, guild_id=self.cfg['guild_id'])
             channel.send.assert_awaited_once()
         fake.public_chat.assert_not_called()
 
@@ -185,14 +228,13 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
         channel = MagicMock(spec=discord.DMChannel)
         channel.send = AsyncMock()
         channel.typing.return_value = MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())
-        fake = SimpleNamespace(cfg=self.cfg, member=AsyncMock(return_value=True),
-            command=AsyncMock(return_value="Starting the choir."))
+        fake = self.fake_ray(command=AsyncMock(return_value="Starting the choir."))
         message = SimpleNamespace(author=SimpleNamespace(bot=False,id=self.cfg['owner_id']),content="play the choir",channel=channel,guild=None)
         await Ray.on_message(fake, message)
-        fake.command.assert_awaited_once_with(self.cfg['owner_id'], "play", "", private=True)
+        fake.command.assert_awaited_once_with(self.cfg['owner_id'], "play", "", private=True, guild_id=None)
 
     async def test_garth_messages_and_bot_messages_ignored(self):
-        fake = SimpleNamespace(cfg=self.cfg, user=SimpleNamespace(id=999), public_chat=AsyncMock())
+        fake = self.fake_ray(public_chat=AsyncMock())
         for content, bot in [('Garth, hello', False), ('hello', True)]:
             message = SimpleNamespace(author=SimpleNamespace(bot=bot), content=content, channel=SimpleNamespace(id=self.cfg['text_channel_id']), guild=SimpleNamespace(id=self.cfg['guild_id']), mentions=[])
             await Ray.on_message(fake, message)
@@ -215,27 +257,39 @@ class AuthorizationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disabled_public_content_does_not_read_history(self):
         fake = SimpleNamespace(public_content_enabled=False, get_channel=lambda _: self.fail("Should not access channels"))
-        self.assertEqual(await Ray.public_context(fake), [])
+        self.assertEqual(await Ray.public_context(fake, self.gcfg), [])
 
 
 class DeliveryTests(unittest.IsolatedAsyncioTestCase):
+    def make_tick_fake(self, store, gcfg, channel, brain_prayer):
+        async def fake_sermon_prayer(period, text=None, publish=None, reading=False):
+            # Mirror the real SermonSession.prayer: publish, then speak.
+            if publish:
+                await publish(text)
+            return "Prayer spoken in Meditation Vibes and posted in chat."
+        return SimpleNamespace(store=store,
+            get_channel=lambda _: channel, public_context=AsyncMock(return_value=["Public news"]),
+            brain=SimpleNamespace(prayer=brain_prayer),
+            sermon_for=lambda gid: SimpleNamespace(prayer=fake_sermon_prayer))
+
     async def test_prayer_sent_once_and_only_public_data_supplied(self):
         temp = tempfile.TemporaryDirectory()
         store = Store(Path(temp.name)/"state.db")
+        cfg = load_config()
+        gcfg = make_gcfg(cfg)
         store.remember_turn(42, "PRIVATE SECRET", "PRIVATE REPLY")
-        store.share_request(42, "Public prayer request")
+        store.share_request(42, "Public prayer request", gcfg.guild_id)
         channel = MagicMock(spec=discord.TextChannel)
         channel.send = AsyncMock(return_value=SimpleNamespace(id=100))
-        fake = SimpleNamespace(cfg=load_config(), store=store,
-            get_channel=lambda _: channel, public_context=AsyncMock(return_value=["Public news"]),
-            brain=SimpleNamespace(prayer=AsyncMock(return_value="A community prayer. Amen.")))
+        fake = self.make_tick_fake(store, gcfg, channel,
+            AsyncMock(return_value="A community prayer. Amen."))
         try:
             with patch("pastor_ray.bot.due_slot", return_value="2026-09-22T08:00"):
-                await Ray.prayer_tick.coro(fake)
-                await Ray.prayer_tick.coro(fake)
+                await Ray._prayer_tick_guild(fake, gcfg)
+                await Ray._prayer_tick_guild(fake, gcfg)
             channel.send.assert_awaited_once()
             fake.brain.prayer.assert_awaited_once_with("morning", ["Public news"], ["Public prayer request"])
-            self.assertEqual(store.last_prayer()["state"], "sent")
+            self.assertEqual(store.last_prayer(gcfg.guild_id)["state"], "sent")
         finally:
             store.close()
             temp.cleanup()
@@ -243,18 +297,19 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_failure_uses_fallback_without_repeat_send(self):
         temp = tempfile.TemporaryDirectory()
         store = Store(Path(temp.name)/"state.db")
+        cfg = load_config()
+        gcfg = make_gcfg(cfg)
         channel = MagicMock(spec=discord.TextChannel)
         channel.send = AsyncMock(side_effect=TimeoutError())
-        fake = SimpleNamespace(cfg=load_config(), store=store,
-            get_channel=lambda _: channel, public_context=AsyncMock(return_value=[]),
-            brain=SimpleNamespace(prayer=AsyncMock(side_effect=RuntimeError())))
+        fake = self.make_tick_fake(store, gcfg, channel,
+            AsyncMock(side_effect=RuntimeError()))
         try:
             with patch("pastor_ray.bot.due_slot", return_value="2026-09-22T20:00"):
-                await Ray.prayer_tick.coro(fake)
-                await Ray.prayer_tick.coro(fake)
+                await Ray._prayer_tick_guild(fake, gcfg)
+                await Ray._prayer_tick_guild(fake, gcfg)
             channel.send.assert_awaited_once()
             self.assertIn("Father", channel.send.call_args.args[0])
-            self.assertEqual(store.last_prayer()["state"], "failed")
+            self.assertEqual(store.last_prayer(gcfg.guild_id)["state"], "failed")
         finally:
             store.close()
             temp.cleanup()

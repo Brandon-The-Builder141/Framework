@@ -13,8 +13,10 @@ log = logging.getLogger('pastor_ray.music')
 
 
 class Choir:
-    def __init__(self, bot, cfg):
-        self.bot, self.cfg = bot, cfg
+    """One choir (music voice session) per guild. Ray holds one of these per
+    server in ``bot.choir_sessions``; playback state never crosses guilds."""
+    def __init__(self, bot, gcfg):
+        self.bot, self.gcfg = bot, gcfg
         self.voice = None
         self.track = None
         self.task = None
@@ -43,7 +45,7 @@ class Choir:
                 return "Music needs FFmpeg installed first."
             if not self.tracks():
                 return "The music library is empty. Run python -m pastor_ray.fetch_music."
-            channel = self.bot.get_channel(self.cfg["voice_channel_id"])
+            channel = self.bot.get_channel(self.gcfg.voice_channel_id)
             if not isinstance(channel, discord.VoiceChannel):
                 return "I can't find Meditation Vibes. Check my channel permissions."
             if self.another_bot(channel, self.bot.user.id):
@@ -86,9 +88,9 @@ class Choir:
                         errors.append(error)
                     loop.call_soon_threadsafe(done.set)
                 source = discord.FFmpegPCMAudio(str(ROOT / self.track["file"]),
-                    before_options="-nostdin", options=f"-vn -af loudnorm=I=-18:TP=-1.5:LRA=11,volume={float(self.cfg['volume'])}")
+                    before_options="-nostdin", options=f"-vn -af loudnorm=I=-18:TP=-1.5:LRA=11,volume={float(self.bot.globals['volume'])}")
                 self.voice.play(source, after=after)
-                channel = self.bot.get_channel(self.cfg["text_channel_id"])
+                channel = self.bot.get_channel(self.gcfg.text_channel_id)
                 if channel:
                     try:
                         await channel.send(f"🎵 **{self.track['title']}**\n{self.track['attribution']}\n"

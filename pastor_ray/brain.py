@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone
 
 import httpx
 from pastor_ray.pastoral import PASTORAL_RULES
 from pastor_ray.scripture import context as scripture_context
+
+log = logging.getLogger("pastor_ray.brain")
 
 PERSONA = '''You are Pastor Ray, a digital Christian faith companion for a Discord community.
 You are warm, grounded, strong-willed but understanding, gently humorous when appropriate,
@@ -98,7 +101,15 @@ class Brain:
     def __init__(self, cfg):
         self.cfg = cfg
         self.client = httpx.AsyncClient(base_url=cfg["ollama_url"], timeout=180, trust_env=False)
-        self.lock = asyncio.Lock()
+        # Bound concurrent model calls: simultaneous guilds queue instead of
+        # piling onto one connection and timing out. Two in flight is a safe
+        # default for a local Ollama box; raise only with headroom to spare.
+        self.sem = asyncio.Semaphore(2)
+
+    async def _throttle(self):
+        if self.sem.locked():
+            log.info("Ollama at capacity; queuing model request")
+        await self.sem.acquire()
 
     async def memories(self, store, uid, text):
         vector = None
@@ -120,7 +131,8 @@ class Brain:
         return records
 
     async def complete(self, messages, tokens=650):
-        async with self.lock:
+        await self._throttle()
+        try:
             response = await self.client.post("/api/chat", json={
                 "model": self.cfg["model"], "stream": False, "think": False,
                 "messages": messages, "keep_alive": "15m",
@@ -132,10 +144,13 @@ class Brain:
             if not text:
                 raise ValueError("Local model returned no answer")
             return text
+        finally:
+            self.sem.release()
 
     async def teach(self, messages, tokens=1200):
         """Public Scripture teaching uses the stronger installed local model."""
-        async with self.lock:
+        await self._throttle()
+        try:
             response = await self.client.post('/api/chat', json={
                 'model': self.cfg.get('sermon_model', 'qwen3:latest'),
                 'stream': False, 'think': False, 'keep_alive': '15m',
@@ -147,10 +162,13 @@ class Brain:
             if not text:
                 raise ValueError('Local teaching model returned no answer')
             return text
+        finally:
+            self.sem.release()
 
     async def review(self, messages, tokens=400):
         """Independent local fact check; private conversations do not use this path."""
-        async with self.lock:
+        await self._throttle()
+        try:
             response=await self.client.post('/api/chat',json={
                 'model':self.cfg.get('review_model','qwen3:latest'),
                 'stream':False,'think':False,'format':'json','keep_alive':'15m',
@@ -161,6 +179,8 @@ class Brain:
             text=response.json().get('message',{}).get('content','').strip()
             if not text:raise ValueError('Local reviewer returned no verdict')
             return text
+        finally:
+            self.sem.release()
 
     async def chat(self, text, history, profile):
         profile = {**profile, 'notes':[n[:500] for n in profile.get('notes',[])[:8]],
