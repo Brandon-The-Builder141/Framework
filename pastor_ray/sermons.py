@@ -281,7 +281,7 @@ class SermonSession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning('Voice prayer failed: %s',type(exc).__name__)
+            log.warning('Voice prayer failed: guild=%s channel=%s kind=%s',self.guild_id,self.gcfg.voice_channel_id,type(exc).__name__)
             return 'The voice reading could not finish. Please try again.' if reading else 'The spoken prayer could not finish. Please try again.'
         finally:
             if self.voice:
@@ -323,7 +323,7 @@ class SermonSession:
             await self.voice.start_file(path)
             if not self.voice.is_playing():
                 raise RuntimeError('Node audio failed to start')
-            log.info('DAVE sidecar playback verified: connected=True playing=True')
+            log.info('DAVE sidecar playback verified: guild=%s connected=True playing=True',self.guild_id)
             await self.announce('Pastor Ray is speaking in Meditation Vibes.')
             await self.refresh_listening()
             if not self.interrupting:
